@@ -1,0 +1,189 @@
+import React, { useEffect, useState } from 'react';
+import { View, StyleSheet, Dimensions } from 'react-native';
+import MapView, { Marker, Polyline } from 'react-native-maps';
+import * as Location from 'expo-location';
+import axios from 'axios';
+
+const { width, height } = Dimensions.get('window');
+
+const destination = {
+  latitude: -8.850875,
+  longitude: 13.2795049,
+};
+
+const customMapStyle = [
+  {
+    elementType: "geometry",
+    stylers: [{ color: "#f5f5f5" }], // fundo geral claro
+  },
+  {
+    elementType: "labels.icon", 
+    stylers: [{ visibility: "off" }], // remove ícones padrão
+  },
+  {
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#8e8e93" }], // cinza suave, legível
+  },
+  {
+    elementType: "labels.text.stroke",
+    stylers: [{ color: "#ffffff" }],
+  },
+  {
+    featureType: "administrative",
+    elementType: "geometry",
+    stylers: [{ color: "#dcdcdc" }],
+  },
+  {
+    featureType: "poi",
+    stylers: [{ visibility: "off" }], // remove POIs pra dar foco aos teus pontos
+  },
+  {
+    featureType: "road",
+    elementType: "geometry",
+    stylers: [{ color: "#e0e0e0" }],
+  },
+  {
+    featureType: "road",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#a3a3a3" }],
+  },
+  {
+    featureType: "road.highway",
+    elementType: "geometry",
+    stylers: [{ color: "#d6d6d6" }],
+  },
+  {
+    featureType: "road.highway",
+    elementType: "geometry.stroke",
+    stylers: [{ color: "#c6c6c6" }],
+  },
+  {
+    featureType: "transit",
+    stylers: [{ visibility: "off" }], // remove metrô/ônibus/etc
+  },
+  {
+    featureType: "water",
+    elementType: "geometry",
+    stylers: [{ color: "#51adf8" }], // azul claro clean
+  },
+  {
+    featureType: "water",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#a0cbe3" }],
+  },
+];
+
+
+export default function MapRouteScreen() {
+  const [location, setLocation] = useState(null);
+  const [routeCoords, setRouteCoords] = useState([]);
+  const [instructions, setInstructions] = useState([]);
+
+  useEffect(() => {
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('Permissão negada para acessar localização');
+        return;
+      }
+
+      const loc = await Location.getCurrentPositionAsync({});
+      setLocation(loc.coords);
+
+      fetchRoute(loc.coords, destination);
+    })();
+  }, []);
+
+  const fetchRoute = async (origin, dest) => {
+    const originStr = `${origin.latitude},${origin.longitude}`;
+    const destStr = `${dest.latitude},${dest.longitude}`;
+
+    const response = await axios.get(
+      `https://maps.googleapis.com/maps/api/directions/json?origin=${originStr}&destination=${destStr}&key=AIzaSyDvlluZdGne72qulEkiRUOzMKeli-gotw8`
+    );
+
+    if (response.data.routes.length) {
+      const points = decodePolyline(response.data.routes[0].overview_polyline.points);
+      setRouteCoords(points);
+
+      // Extrair instruções passo-a-passo
+      const steps = response.data.routes[0].legs[0].steps;
+      const formattedSteps = steps.map(step => ({
+        instruction: step.html_instructions.replace(/<[^>]*>?/gm, ''), // Remove tags HTML
+        location: {
+          latitude: step.end_location.lat,
+          longitude: step.end_location.lng
+        }
+      }));
+      setInstructions(formattedSteps);
+    }
+  };
+
+  function decodePolyline(encoded) {
+    let points = [];
+    let index = 0, len = encoded.length;
+    let lat = 0, lng = 0;
+
+    while (index < len) {
+      let b, shift = 0, result = 0;
+      do {
+        b = encoded.charCodeAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      const dlat = ((result & 1) ? ~(result >> 1) : result >> 1);
+      lat += dlat;
+
+      shift = 0;
+      result = 0;
+      do {
+        b = encoded.charCodeAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      const dlng = ((result & 1) ? ~(result >> 1) : result >> 1);
+      lng += dlng;
+
+      points.push({
+        latitude: lat / 1e5,
+        longitude: lng / 1e5,
+      });
+    }
+    return points;
+  }
+
+  return (
+    <View style={styles.container}>
+      {location && (
+        <MapView
+          customMapStyle = {customMapStyle} 
+          style={styles.map}
+          initialRegion={{
+            latitude: location.latitude,
+            longitude: location.longitude,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          }}
+        >
+          <Marker coordinate={location} title="Você" />
+          <Marker coordinate={destination} title="Destino" />
+
+          {/* Linha da rota */}
+          {routeCoords.length > 0 && (
+            <Polyline coordinates={routeCoords} strokeWidth={6} strokeColor="#FB6A6A" />
+          )}
+        </MapView>
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  map: {
+    width,
+    height,
+  },
+});
